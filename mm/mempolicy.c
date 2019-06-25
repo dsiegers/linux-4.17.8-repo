@@ -132,6 +132,8 @@ struct mempolicy *get_task_policy(struct task_struct *p)
 	struct mempolicy *pol = p->mempolicy;
 	int node;
 
+	printk("flow check %s, %s, %d", __FILE__, __func__, __LINE__);
+
 	if (pol)
 		return pol;
 
@@ -1970,6 +1972,8 @@ static struct page *alloc_page_interleave(gfp_t gfp, unsigned order,
 					unsigned nid)
 {
 	struct page *page;
+
+        printk("flow check %s, %s, %d", __FILE__, __func__, __LINE__);
 
 	page = __alloc_pages(gfp, order, nid);
 	/* skip NUMA_INTERLEAVE_HIT counter update if numa stats is disabled */

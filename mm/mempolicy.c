@@ -1709,6 +1709,11 @@ static int apply_policy_zone(struct mempolicy *policy, enum zone_type zone)
  */
 static nodemask_t *policy_nodemask(gfp_t gfp, struct mempolicy *policy)
 {
+	static u32 counter = 0;
+        counter++;
+        if (counter%10000==0)
+                printk("flow check %s, %s, %d", __FILE__, __func__, __LINE__);
+
 	/* Lower zones don't get a nodemask applied for MPOL_BIND */
 	if (unlikely(policy->mode == MPOL_BIND) &&
 			apply_policy_zone(policy, gfp_zone(gfp)) &&

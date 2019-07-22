@@ -78,6 +78,11 @@ static DEFINE_MUTEX(pcp_batch_high_lock);
 #define MIN_PERCPU_PAGELIST_FRACTION	(8)
 
 #ifdef CONFIG_USE_PERCPU_NUMA_NODE_ID
+DEFINE_PER_CPU(unsigned long int, freelistCounter);		//counter for the passes in get_page_from_freelist
+DEFINE_PER_CPU(unsigned long int, compactCounter);             //counter for the passes in __alloc_pages_direst_compact
+DEFINE_PER_CPU(unsigned long int, reclaimCounter);             //counter for the passes in __alloc_pages_direct_reclaim
+DEFINE_PER_CPU(unsigned long int, cpusetCounter);             //counter for the passes in __alloc_pages_cpuset_fallback
+
 DEFINE_PER_CPU(int, numa_node);
 EXPORT_PER_CPU_SYMBOL(numa_node);
 #endif

@@ -79,9 +79,13 @@ static DEFINE_MUTEX(pcp_batch_high_lock);
 
 #ifdef CONFIG_USE_PERCPU_NUMA_NODE_ID
 DEFINE_PER_CPU(unsigned long int, freelistCounter);		//counter for the passes in get_page_from_freelist
+EXPORT_PER_CPU_SYMBOL(freelistCounter);
 DEFINE_PER_CPU(unsigned long int, compactCounter);             //counter for the passes in __alloc_pages_direst_compact
+EXPORT_PER_CPU_SYMBOL(compactCounter);
 DEFINE_PER_CPU(unsigned long int, reclaimCounter);             //counter for the passes in __alloc_pages_direct_reclaim
+EXPORT_PER_CPU_SYMBOL(reclaimCounter);
 DEFINE_PER_CPU(unsigned long int, cpusetCounter);             //counter for the passes in __alloc_pages_cpuset_fallback
+EXPORT_PER_CPU_SYMBOL(cpusetCounter);
 
 DEFINE_PER_CPU(int, numa_node);
 EXPORT_PER_CPU_SYMBOL(numa_node);
@@ -3262,6 +3266,8 @@ get_page_from_freelist(gfp_t gfp_mask, unsigned int order, int alloc_flags,
 	struct zone *zone;
 	struct pglist_data *last_pgdat_dirty_limit = NULL;
 
+	this_cpu_inc(freelistCounter);
+
 	/*
 	 * Scan zonelist, looking for a zone with enough free.
 	 * See also __cpuset_node_allowed() comment in kernel/cpuset.c.
@@ -3442,6 +3448,8 @@ __alloc_pages_cpuset_fallback(gfp_t gfp_mask, unsigned int order,
 {
 	struct page *page;
 
+	this_cpu_inc(cpusetCounter);
+
 	page = get_page_from_freelist(gfp_mask, order,
 			alloc_flags|ALLOC_CPUSET, ac);
 	/*
@@ -3558,6 +3566,8 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 {
 	struct page *page;
 	unsigned int noreclaim_flag;
+
+	this_cpu_inc(compactCounter);
 
 	if (!order)
 		return NULL;
@@ -3784,6 +3794,8 @@ __alloc_pages_direct_reclaim(gfp_t gfp_mask, unsigned int order,
 {
 	struct page *page = NULL;
 	bool drained = false;
+
+	this_cpu_inc(reclaimCounter);
 
 	*did_some_progress = __perform_reclaim(gfp_mask, order, ac);
 	if (unlikely(!(*did_some_progress)))

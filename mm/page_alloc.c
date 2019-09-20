@@ -86,6 +86,14 @@ DEFINE_PER_CPU(unsigned long int, reclaimCounter);             //counter for the
 EXPORT_PER_CPU_SYMBOL(reclaimCounter);
 DEFINE_PER_CPU(unsigned long int, cpusetCounter);             //counter for the passes in __alloc_pages_cpuset_fallback
 EXPORT_PER_CPU_SYMBOL(cpusetCounter);
+DEFINE_PER_CPU(unsigned long int, freelistIf);             //time counter for the passes in freelist if
+EXPORT_PER_CPU_SYMBOL(freelistIf);
+DEFINE_PER_CPU(unsigned long int, freelistEndif);             //time counter for the passes in freelist endif
+EXPORT_PER_CPU_SYMBOL(freelistEndif);
+DEFINE_PER_CPU(unsigned long int, freelistTry);             //time counter for the passes in freelist try this zone
+EXPORT_PER_CPU_SYMBOL(freelistTry);
+
+
 
 DEFINE_PER_CPU(int, numa_node);
 EXPORT_PER_CPU_SYMBOL(numa_node);
@@ -3265,6 +3273,9 @@ get_page_from_freelist(gfp_t gfp_mask, unsigned int order, int alloc_flags,
 	struct zoneref *z = ac->preferred_zoneref;
 	struct zone *zone;
 	struct pglist_data *last_pgdat_dirty_limit = NULL;
+	u64 cycle_start;
+
+	u64 overall_start = rdtsc();	
 
 	this_cpu_inc(freelistCounter);
 
@@ -3311,6 +3322,8 @@ get_page_from_freelist(gfp_t gfp_mask, unsigned int order, int alloc_flags,
 		}
 
 		mark = zone->watermark[alloc_flags & ALLOC_WMARK_MASK];
+		__this_cpu_add(freelistIf, rdtsc() - overall_start);
+
 		if (!zone_watermark_fast(zone, order, mark,
 				       ac_classzone_idx(ac), alloc_flags)) {
 			int ret;
@@ -3320,27 +3333,37 @@ get_page_from_freelist(gfp_t gfp_mask, unsigned int order, int alloc_flags,
 			 * Watermark failed for this zone, but see if we can
 			 * grow this zone if it contains deferred pages.
 			 */
+
 			if (static_branch_unlikely(&deferred_pages)) {
 				if (_deferred_grow_zone(zone, order))
 					goto try_this_zone;
 			}
+
 #endif
 			/* Checked here to keep the fast path fast */
+			cycle_start = rdtsc();
+
 			BUILD_BUG_ON(ALLOC_NO_WATERMARKS < NR_WMARK);
 			if (alloc_flags & ALLOC_NO_WATERMARKS)
 				goto try_this_zone;
 
 			if (node_reclaim_mode == 0 ||
-			    !zone_allows_reclaim(ac->preferred_zoneref->zone, zone))
-				continue;
+			    !zone_allows_reclaim(ac->preferred_zoneref->zone, zone)){
 
+				__this_cpu_add(freelistEndif, rdtsc() - cycle_start);
+				continue;
+			}
 			ret = node_reclaim(zone->zone_pgdat, gfp_mask, order);
 			switch (ret) {
 			case NODE_RECLAIM_NOSCAN:
 				/* did not scan */
+
+				__this_cpu_add(freelistEndif, rdtsc() - cycle_start);
 				continue;
 			case NODE_RECLAIM_FULL:
 				/* scanned but unreclaimable */
+			
+				__this_cpu_add(freelistEndif, rdtsc() - cycle_start);
 				continue;
 			default:
 				/* did we reclaim enough */
@@ -3348,11 +3371,14 @@ get_page_from_freelist(gfp_t gfp_mask, unsigned int order, int alloc_flags,
 						ac_classzone_idx(ac), alloc_flags))
 					goto try_this_zone;
 
+				__this_cpu_add(freelistEndif, rdtsc() - cycle_start);
 				continue;
 			}
 		}
 
 try_this_zone:
+		cycle_start = rdtsc();
+
 		page = rmqueue(ac->preferred_zoneref->zone, zone, order,
 				gfp_mask, alloc_flags, ac->migratetype);
 		if (page) {
@@ -3375,8 +3401,9 @@ try_this_zone:
 			}
 #endif
 		}
+		__this_cpu_add(freelistTry, rdtsc() - cycle_start);
 	}
-
+	
 	return NULL;
 }
 

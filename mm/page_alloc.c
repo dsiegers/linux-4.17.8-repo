@@ -3274,6 +3274,7 @@ get_page_from_freelist(gfp_t gfp_mask, unsigned int order, int alloc_flags,
 	struct zone *zone;
 	struct pglist_data *last_pgdat_dirty_limit = NULL;
 	u64 cycle_start;
+	int try_this=0;
 
 	u64 overall_start = rdtsc();	
 
@@ -3344,8 +3345,10 @@ get_page_from_freelist(gfp_t gfp_mask, unsigned int order, int alloc_flags,
 			cycle_start = rdtsc();
 
 			BUILD_BUG_ON(ALLOC_NO_WATERMARKS < NR_WMARK);
-			if (alloc_flags & ALLOC_NO_WATERMARKS)
+			if (alloc_flags & ALLOC_NO_WATERMARKS){
+				__this_cpu_add(freelistEndif, rdtsc() - cycle_start);
 				goto try_this_zone;
+			}
 
 			if (node_reclaim_mode == 0 ||
 			    !zone_allows_reclaim(ac->preferred_zoneref->zone, zone)){
@@ -3368,16 +3371,18 @@ get_page_from_freelist(gfp_t gfp_mask, unsigned int order, int alloc_flags,
 			default:
 				/* did we reclaim enough */
 				if (zone_watermark_ok(zone, order, mark,
-						ac_classzone_idx(ac), alloc_flags))
+						ac_classzone_idx(ac), alloc_flags)){
+					__this_cpu_add(freelistEndif, rdtsc() - cycle_start);
 					goto try_this_zone;
+				}
 
-				__this_cpu_add(freelistEndif, rdtsc() - cycle_start);
 				continue;
 			}
 		}
 
 try_this_zone:
-		cycle_start = rdtsc();
+		if (try_this == 0)
+			cycle_start = rdtsc();
 
 		page = rmqueue(ac->preferred_zoneref->zone, zone, order,
 				gfp_mask, alloc_flags, ac->migratetype);
@@ -3391,18 +3396,25 @@ try_this_zone:
 			if (unlikely(order && (alloc_flags & ALLOC_HARDER)))
 				reserve_highatomic_pageblock(page, zone, order);
 
+			 __this_cpu_add(freelistTry, rdtsc() - cycle_start);
+			try_this = 0;			
+			__this_cpu_add(freelistIf, rdtsc() - overall_start);			
+
 			return page;
 		} else {
 #ifdef CONFIG_DEFERRED_STRUCT_PAGE_INIT
 			/* Try again if zone has deferred pages */
 			if (static_branch_unlikely(&deferred_pages)) {
-				if (_deferred_grow_zone(zone, order))
+				if (_deferred_grow_zone(zone, order)){
+					try_this = 1;
 					goto try_this_zone;
+				}
 			}
 #endif
 		}
-		__this_cpu_add(freelistTry, rdtsc() - cycle_start);
 	}
+        __this_cpu_add(freelistIf, rdtsc() - overall_start);
+
 	
 	return NULL;
 }

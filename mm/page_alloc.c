@@ -2999,11 +2999,17 @@ struct page *rmqueue(struct zone *preferred_zone,
 	unsigned long flags;
 	struct page *page;
 
+	u64 cycle_start = rdtsc();
+        u64 overall_start = rdtsc();
+
+
 	if (likely(order == 0)) {
 		page = rmqueue_pcplist(preferred_zone, zone, order,
 				gfp_flags, migratetype);
 		goto out;
 	}
+
+	__this_cpu_add(freelistTry, rdtsc() - cycle_start);
 
 	/*
 	 * We most definitely don't want callers attempting to
@@ -3012,7 +3018,11 @@ struct page *rmqueue(struct zone *preferred_zone,
 	WARN_ON_ONCE((gfp_flags & __GFP_NOFAIL) && (order > 1));
 	spin_lock_irqsave(&zone->lock, flags);
 
+	cycle_start = rdtsc();
+
 	do {
+		this_cpu_inc(freelistCounter);		
+
 		page = NULL;
 		if (alloc_flags & ALLOC_HARDER) {
 			page = __rmqueue_smallest(zone, order, MIGRATE_HIGHATOMIC);
@@ -3022,6 +3032,9 @@ struct page *rmqueue(struct zone *preferred_zone,
 		if (!page)
 			page = __rmqueue(zone, order, migratetype);
 	} while (page && check_new_pages(page, order));
+
+	__this_cpu_add(freelistEndif, rdtsc() - cycle_start);
+
 	spin_unlock(&zone->lock);
 	if (!page)
 		goto failed;
@@ -3034,10 +3047,16 @@ struct page *rmqueue(struct zone *preferred_zone,
 
 out:
 	VM_BUG_ON_PAGE(page && bad_range(zone, page), page);
+
+        __this_cpu_add(freelistIf, rdtsc() - overall_start);
+
 	return page;
 
 failed:
 	local_irq_restore(flags);
+	
+        __this_cpu_add(freelistIf, rdtsc() - overall_start);
+
 	return NULL;
 }
 
@@ -3277,7 +3296,7 @@ get_page_from_freelist(gfp_t gfp_mask, unsigned int order, int alloc_flags,
 	u64 rmqueue_cycle_start;
 	int try_this=0;
 
-	u64 overall_start = rdtsc();	
+
 
 
 	/*
@@ -3323,7 +3342,7 @@ get_page_from_freelist(gfp_t gfp_mask, unsigned int order, int alloc_flags,
 		}
 
 		mark = zone->watermark[alloc_flags & ALLOC_WMARK_MASK];
-		__this_cpu_add(freelistIf, rdtsc() - overall_start);
+
 
 		if (!zone_watermark_fast(zone, order, mark,
 				       ac_classzone_idx(ac), alloc_flags)) {
@@ -3384,13 +3403,13 @@ try_this_zone:
 		if (try_this == 0)
 			cycle_start = rdtsc();
 
-		this_cpu_inc(freelistCounter);
+
 
 		rmqueue_cycle_start = rdtsc();
 
 		page = rmqueue(ac->preferred_zoneref->zone, zone, order,
 				gfp_mask, alloc_flags, ac->migratetype);
-		__this_cpu_add(freelistEndif, rdtsc() - rmqueue_cycle_start);
+
 
 		if (page) {
 			prep_new_page(page, order, gfp_mask, alloc_flags);
@@ -3402,9 +3421,9 @@ try_this_zone:
 			if (unlikely(order && (alloc_flags & ALLOC_HARDER)))
 				reserve_highatomic_pageblock(page, zone, order);
 
-			 __this_cpu_add(freelistTry, rdtsc() - cycle_start);
+
 			try_this = 0;			
-			__this_cpu_add(freelistIf, rdtsc() - overall_start);			
+	
 
 			return page;
 		} else {
@@ -3419,7 +3438,7 @@ try_this_zone:
 #endif
 		}
 	}
-        __this_cpu_add(freelistIf, rdtsc() - overall_start);
+       
 
 	
 	return NULL;

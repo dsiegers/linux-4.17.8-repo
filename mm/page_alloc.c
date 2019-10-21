@@ -2999,7 +2999,8 @@ struct page *rmqueue(struct zone *preferred_zone,
 	unsigned long flags;
 	struct page *page;
 
-	u64 cycle_start = rdtsc();
+	u64 cycle_start;
+	u64 inner_cycle_start;
         u64 overall_start = rdtsc();
 
 
@@ -3009,31 +3010,36 @@ struct page *rmqueue(struct zone *preferred_zone,
 		goto out;
 	}
 
-	__this_cpu_add(freelistTry, rdtsc() - cycle_start);
-
 	/*
 	 * We most definitely don't want callers attempting to
 	 * allocate greater than order-1 page units with __GFP_NOFAIL.
 	 */
 	WARN_ON_ONCE((gfp_flags & __GFP_NOFAIL) && (order > 1));
 	spin_lock_irqsave(&zone->lock, flags);
-
+	
 	cycle_start = rdtsc();
-
 	do {
 		this_cpu_inc(freelistCounter);		
 
 		page = NULL;
+
+		inner_cycle_start = rdtsc();
+
 		if (alloc_flags & ALLOC_HARDER) {
 			page = __rmqueue_smallest(zone, order, MIGRATE_HIGHATOMIC);
+
 			if (page)
 				trace_mm_page_alloc_zone_locked(page, order, migratetype);
 		}
-		if (!page)
-			page = __rmqueue(zone, order, migratetype);
+
+		if (!page){
+			page = __rmqueue(zone, order, migratetype);	
+		}
+		__this_cpu_add(freelistTry, rdtsc() - inner_cycle_start);
+
 	} while (page && check_new_pages(page, order));
 
-	__this_cpu_add(freelistEndif, rdtsc() - cycle_start);
+	 __this_cpu_add(freelistEndif, rdtsc() - cycle_start);
 
 	spin_unlock(&zone->lock);
 	if (!page)

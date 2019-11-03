@@ -3001,7 +3001,7 @@ struct page *rmqueue(struct zone *preferred_zone,
 
 	u64 cycle_start;
 	u64 inner_cycle_start;
-        u64 overall_start = rdtsc();
+        u64 overall_start = rdtsc_ordered();
 
 
 	if (likely(order == 0)) {
@@ -3017,13 +3017,13 @@ struct page *rmqueue(struct zone *preferred_zone,
 	WARN_ON_ONCE((gfp_flags & __GFP_NOFAIL) && (order > 1));
 	spin_lock_irqsave(&zone->lock, flags);
 	
-	cycle_start = rdtsc();
+	cycle_start = rdtsc_ordered();
 	do {
 		this_cpu_inc(freelistCounter);		
 
 		page = NULL;
 
-		inner_cycle_start = rdtsc();
+		inner_cycle_start = rdtsc_ordered();
 
 		if (alloc_flags & ALLOC_HARDER) {
 			page = __rmqueue_smallest(zone, order, MIGRATE_HIGHATOMIC);
@@ -3035,11 +3035,11 @@ struct page *rmqueue(struct zone *preferred_zone,
 		if (!page){
 			page = __rmqueue(zone, order, migratetype);	
 		}
-		__this_cpu_add(freelistTry, rdtsc() - inner_cycle_start);
+		__this_cpu_add(freelistTry, rdtsc_ordered() - inner_cycle_start);
 
 	} while (page && check_new_pages(page, order));
 
-	 __this_cpu_add(freelistEndif, rdtsc() - cycle_start);
+	 __this_cpu_add(freelistEndif, rdtsc_ordered() - cycle_start);
 
 	spin_unlock(&zone->lock);
 	if (!page)
@@ -3054,14 +3054,14 @@ struct page *rmqueue(struct zone *preferred_zone,
 out:
 	VM_BUG_ON_PAGE(page && bad_range(zone, page), page);
 
-        __this_cpu_add(freelistIf, rdtsc() - overall_start);
+        __this_cpu_add(freelistIf, rdtsc_ordered() - overall_start);
 
 	return page;
 
 failed:
 	local_irq_restore(flags);
 	
-        __this_cpu_add(freelistIf, rdtsc() - overall_start);
+        __this_cpu_add(freelistIf, rdtsc_ordered() - overall_start);
 
 	return NULL;
 }

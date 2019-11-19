@@ -3624,14 +3624,21 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 	struct page *page;
 	unsigned int noreclaim_flag;
 
+	u64 cycle_start;
+
 	this_cpu_inc(compactCounter);
 
 	if (!order)
 		return NULL;
 
 	noreclaim_flag = memalloc_noreclaim_save();
+
+	cycle_start = rdtsc_ordered();
+
 	*compact_result = try_to_compact_pages(gfp_mask, order, alloc_flags, ac,
 									prio);
+	__this_cpu_add(freelistEndif, rdtsc_ordered() - cycle_start);
+
 	memalloc_noreclaim_restore(noreclaim_flag);
 
 	if (*compact_result <= COMPACT_INACTIVE)
@@ -3645,6 +3652,8 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 
 	page = get_page_from_freelist(gfp_mask, order, alloc_flags, ac);
 
+	cycle_start = rdtsc_ordered();
+
 	if (page) {
 		struct zone *zone = page_zone(page);
 
@@ -3654,6 +3663,7 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 		return page;
 	}
 
+	__this_cpu_add(freelistTry, rdtsc_ordered() - cycle_start);
 	/*
 	 * It's bad if compaction run occurs and fails. The most likely reason
 	 * is that pages exist, but not enough to satisfy watermarks.
@@ -4261,12 +4271,9 @@ retry:
 		goto nopage;
 
 	/* Try direct reclaim and then allocating */
-	cycle_start = rdtsc_ordered();
 
 	page = __alloc_pages_direct_reclaim(gfp_mask, order, alloc_flags, ac,
 							&did_some_progress);
-	__this_cpu_add(freelistIf, rdtsc_ordered() - cycle_start);
-
 	if (page)
 		goto got_pg;
 
@@ -4275,7 +4282,7 @@ retry:
 
 	page = __alloc_pages_direct_compact(gfp_mask, order, alloc_flags, ac,
 					compact_priority, &compact_result);
-	__this_cpu_add(freelistEndif, rdtsc_ordered() - cycle_start);
+	__this_cpu_add(freelistIf, rdtsc_ordered() - cycle_start);
 
 	if (page)
 		goto got_pg;
@@ -4313,11 +4320,8 @@ retry:
 		goto retry_cpuset;
 
 	/* Reclaim has failed us, start killing things */
-	cycle_start = rdtsc_ordered();
 
 	page = __alloc_pages_may_oom(gfp_mask, order, ac, &did_some_progress);
-
-	__this_cpu_add(freelistTry, rdtsc_ordered() - cycle_start);
 
 	if (page)
 		goto got_pg;

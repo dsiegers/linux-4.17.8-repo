@@ -4122,7 +4122,7 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
 	unsigned int cpuset_mems_cookie;
 	int reserve_flags;
 
-	this_cpu_inc(freelistCounter);
+	u64 cycle_start;
 
 	/*
 	 * In the slowpath, we sanity check order to avoid ever trying to
@@ -4149,7 +4149,7 @@ retry_cpuset:
 	compact_priority = DEF_COMPACT_PRIORITY;
 	cpuset_mems_cookie = read_mems_allowed_begin();
 
-	this_cpu_inc(freelistIf);
+
 
 	/*
 	 * The fast path uses conservative alloc_flags to succeed only until
@@ -4227,7 +4227,7 @@ retry_cpuset:
 
 retry:
 
-	this_cpu_inc(freelistEndif);
+	this_cpu_inc(freelistCounter);
 
 	/* Ensure kswapd doesn't accidentally go to sleep as long as we loop */
 	if (gfp_mask & __GFP_KSWAPD_RECLAIM)
@@ -4261,14 +4261,22 @@ retry:
 		goto nopage;
 
 	/* Try direct reclaim and then allocating */
+	cycle_start = rdtsc_ordered();
+
 	page = __alloc_pages_direct_reclaim(gfp_mask, order, alloc_flags, ac,
 							&did_some_progress);
+	__this_cpu_add(freelistIf, rdtsc_ordered() - cycle_start);
+
 	if (page)
 		goto got_pg;
 
 	/* Try direct compaction and then allocating */
+	cycle_start = rdtsc_ordered();
+
 	page = __alloc_pages_direct_compact(gfp_mask, order, alloc_flags, ac,
 					compact_priority, &compact_result);
+	__this_cpu_add(freelistEndif, rdtsc_ordered() - cycle_start);
+
 	if (page)
 		goto got_pg;
 
@@ -4305,7 +4313,12 @@ retry:
 		goto retry_cpuset;
 
 	/* Reclaim has failed us, start killing things */
+	cycle_start = rdtsc_ordered();
+
 	page = __alloc_pages_may_oom(gfp_mask, order, ac, &did_some_progress);
+
+	__this_cpu_add(freelistTry, rdtsc_ordered() - cycle_start);
+
 	if (page)
 		goto got_pg;
 
@@ -4321,9 +4334,7 @@ retry:
 		goto retry;
 	}
 
-nopage:
-
-	this_cpu_inc(freelistTry);	
+nopage:	
 
 	/* Deal with possible cpuset update races before we fail */
 	if (check_retry_cpuset(cpuset_mems_cookie, ac))

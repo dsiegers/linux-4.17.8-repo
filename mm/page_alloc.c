@@ -2458,18 +2458,12 @@ do_steal:
 static __always_inline struct page *
 __rmqueue(struct zone *zone, unsigned int order, int migratetype)
 {
-	u64 overall_start = rdtsc_ordered();
-	u64 cycle_start;
 
 	struct page *page;
 
-
 retry:
-	this_cpu_inc(freelistCounter);	
 
-	cycle_start = rdtsc_ordered();
 	page = __rmqueue_smallest(zone, order, migratetype);
-	__this_cpu_add(freelistTry, rdtsc_ordered() - cycle_start);
 
 	if (unlikely(!page)) {
 		if (migratetype == MIGRATE_MOVABLE)
@@ -2481,7 +2475,6 @@ retry:
 
 	trace_mm_page_alloc_zone_locked(page, order, migratetype);
 
-	__this_cpu_add(freelistEndif, rdtsc_ordered() - overall_start);
 	return page;
 }
 
@@ -3010,8 +3003,6 @@ struct page *rmqueue(struct zone *preferred_zone,
 	unsigned long flags;
 	struct page *page;
 
-	u64 cycle_start;
-
 
 	if (likely(order == 0)) {
 		page = rmqueue_pcplist(preferred_zone, zone, order,
@@ -3037,9 +3028,7 @@ struct page *rmqueue(struct zone *preferred_zone,
 		}
 
 		if (!page){
-			cycle_start = rdtsc_ordered();
 			page = __rmqueue(zone, order, migratetype);	
-			__this_cpu_add(freelistIf, rdtsc_ordered() - cycle_start);
 		}
 	} while (page && check_new_pages(page, order));
 
@@ -4133,6 +4122,8 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
 	unsigned int cpuset_mems_cookie;
 	int reserve_flags;
 
+	this_cpu_inc(freelistCounter);
+
 	/*
 	 * In the slowpath, we sanity check order to avoid ever trying to
 	 * reclaim >= MAX_ORDER areas which will never succeed. Callers may
@@ -4157,6 +4148,8 @@ retry_cpuset:
 	no_progress_loops = 0;
 	compact_priority = DEF_COMPACT_PRIORITY;
 	cpuset_mems_cookie = read_mems_allowed_begin();
+
+	this_cpu_inc(freelistIf);
 
 	/*
 	 * The fast path uses conservative alloc_flags to succeed only until
@@ -4233,6 +4226,9 @@ retry_cpuset:
 	}
 
 retry:
+
+	this_cpu_inc(freelistEndif);
+
 	/* Ensure kswapd doesn't accidentally go to sleep as long as we loop */
 	if (gfp_mask & __GFP_KSWAPD_RECLAIM)
 		wake_all_kswapds(order, gfp_mask, ac);
@@ -4326,6 +4322,9 @@ retry:
 	}
 
 nopage:
+
+	this_cpu_inc(freelistTry);	
+
 	/* Deal with possible cpuset update races before we fail */
 	if (check_retry_cpuset(cpuset_mems_cookie, ac))
 		goto retry_cpuset;

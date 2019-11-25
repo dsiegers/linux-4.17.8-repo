@@ -24,6 +24,15 @@
 #include <linux/page_owner.h>
 #include "internal.h"
 
+#ifdef CONFIG_USE_PERCPU_NUMA_NODE_ID
+DEFINE_PER_CPU(unsigned long int, compaction_counter_one);		 //counter for timing and counting in compaction.c
+EXPORT_PER_CPU_SYMBOL(compaction_counter_one);
+DEFINE_PER_CPU(unsigned long int, compaction_counter_two);               //counter for timing and counting in compaction.c
+EXPORT_PER_CPU_SYMBOL(compaction_counter_two);
+DEFINE_PER_CPU(unsigned long int, compaction_counter_three);             //counter for timing and counting in compaction.c
+EXPORT_PER_CPU_SYMBOL(compaction_counter_three);
+#endif
+
 #ifdef CONFIG_COMPACTION
 static inline void count_compact_event(enum vm_event_item item)
 {
@@ -1751,6 +1760,9 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 	struct zone *zone;
 	enum compact_result rc = COMPACT_SKIPPED;
 
+	u64 cycle_start;
+	u64 overall_start = rdtsc_ordered();
+
 	/*
 	 * Check if the GFP flags allow compaction - GFP_NOIO is really
 	 * tricky context because the migration might require IO
@@ -1758,7 +1770,11 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 	if (!may_perform_io)
 		return COMPACT_SKIPPED;
 
+	cycle_start = rdtsc_ordered();
+
 	trace_mm_compaction_try_to_compact_pages(order, gfp_mask, prio);
+
+	__this_cpu_add(compaction_counter_two, rdtsc_ordered() - cycle_start);
 
 	/* Compact each zone in the list */
 	for_each_zone_zonelist_nodemask(zone, z, ac->zonelist, ac->high_zoneidx,
@@ -1771,8 +1787,12 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 			continue;
 		}
 
+		cycle_start = rdtsc_ordered();
+
 		status = compact_zone_order(zone, order, gfp_mask, prio,
 					alloc_flags, ac_classzone_idx(ac));
+		__this_cpu_add(compaction_counter_three, rdtsc_ordered() - cycle_start);
+
 		rc = max(status, rc);
 
 		/* The allocation should succeed, stop compacting */
@@ -1806,6 +1826,7 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 					|| fatal_signal_pending(current))
 			break;
 	}
+	__this_cpu_add(compaction_counter_one, rdtsc_ordered() - overall_start);
 
 	return rc;
 }

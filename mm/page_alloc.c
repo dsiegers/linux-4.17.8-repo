@@ -90,8 +90,8 @@ DEFINE_PER_CPU(unsigned long int, freelistIf);             //time counter for th
 EXPORT_PER_CPU_SYMBOL(freelistIf);
 DEFINE_PER_CPU(unsigned long int, freelistEndif);             //time counter for the passes in freelist endif
 EXPORT_PER_CPU_SYMBOL(freelistEndif);
-DEFINE_PER_CPU(unsigned long int, freelistTry);             //time counter for the passes in freelist try this zone
-EXPORT_PER_CPU_SYMBOL(freelistTry);
+
+
 
 
 
@@ -3289,7 +3289,7 @@ get_page_from_freelist(gfp_t gfp_mask, unsigned int order, int alloc_flags,
 	u64 rmqueue_cycle_start;
 	int try_this=0;
 
-
+	this_cpu_inc(freelistCounter);
 
 
 	/*
@@ -3393,12 +3393,6 @@ get_page_from_freelist(gfp_t gfp_mask, unsigned int order, int alloc_flags,
 		}
 
 try_this_zone:
-		if (try_this == 0)
-			cycle_start = rdtsc();
-
-
-
-		rmqueue_cycle_start = rdtsc();
 
 		page = rmqueue(ac->preferred_zoneref->zone, zone, order,
 				gfp_mask, alloc_flags, ac->migratetype);
@@ -3624,20 +3618,20 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 	struct page *page;
 	unsigned int noreclaim_flag;
 
-	u64 cycle_start;
+	this_cpu_inc(freelistIf);
 
-	this_cpu_inc(compactCounter);
+
 
 	if (!order)
 		return NULL;
 
 	noreclaim_flag = memalloc_noreclaim_save();
 
-	cycle_start = rdtsc_ordered();
+
 
 	*compact_result = try_to_compact_pages(gfp_mask, order, alloc_flags, ac,
 									prio);
-	__this_cpu_add(freelistEndif, rdtsc_ordered() - cycle_start);
+
 
 	memalloc_noreclaim_restore(noreclaim_flag);
 
@@ -3652,7 +3646,7 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 
 	page = get_page_from_freelist(gfp_mask, order, alloc_flags, ac);
 
-	cycle_start = rdtsc_ordered();
+
 
 	if (page) {
 		struct zone *zone = page_zone(page);
@@ -3663,7 +3657,7 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 		return page;
 	}
 
-	__this_cpu_add(freelistTry, rdtsc_ordered() - cycle_start);
+
 	/*
 	 * It's bad if compaction run occurs and fails. The most likely reason
 	 * is that pages exist, but not enough to satisfy watermarks.
@@ -3862,7 +3856,7 @@ __alloc_pages_direct_reclaim(gfp_t gfp_mask, unsigned int order,
 	struct page *page = NULL;
 	bool drained = false;
 
-	this_cpu_inc(reclaimCounter);
+	this_cpu_inc(freelistEndif);
 
 	*did_some_progress = __perform_reclaim(gfp_mask, order, ac);
 	if (unlikely(!(*did_some_progress)))
@@ -4237,7 +4231,7 @@ retry_cpuset:
 
 retry:
 
-	this_cpu_inc(freelistCounter);
+
 
 	/* Ensure kswapd doesn't accidentally go to sleep as long as we loop */
 	if (gfp_mask & __GFP_KSWAPD_RECLAIM)
@@ -4278,11 +4272,11 @@ retry:
 		goto got_pg;
 
 	/* Try direct compaction and then allocating */
-	cycle_start = rdtsc_ordered();
+
 
 	page = __alloc_pages_direct_compact(gfp_mask, order, alloc_flags, ac,
 					compact_priority, &compact_result);
-	__this_cpu_add(freelistIf, rdtsc_ordered() - cycle_start);
+
 
 	if (page)
 		goto got_pg;

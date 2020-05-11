@@ -62,6 +62,9 @@
 #include <trace/events/vmscan.h>
 
 
+DEFINE_PER_CPU(unsigned long int, freelistTry);             //time counter for the passes in freelist try this zone
+EXPORT_PER_CPU_SYMBOL(freelistTry);
+
 struct scan_control {
 	/* How many pages shrink_list() should reclaim */
 	unsigned long nr_to_reclaim;
@@ -3902,6 +3905,8 @@ static int __node_reclaim(struct pglist_data *pgdat, gfp_t gfp_mask, unsigned in
 int node_reclaim(struct pglist_data *pgdat, gfp_t gfp_mask, unsigned int order)
 {
 	int ret;
+
+	this_cpu_inc(freelistTry);
 
 	/*
 	 * Node reclaim reclaims unmapped file backed pages and

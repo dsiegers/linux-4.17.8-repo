@@ -4445,12 +4445,25 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	gfp_t alloc_mask; /* The gfp_t that was actually used for allocation */
 	struct alloc_context ac = { };
 
+	// new vars for added reclaim and compact
+	unsigned long did_some_progress;
+	enum compact_priority compact_priority;
+	enum compact_result compact_result;
+
 	gfp_mask &= gfp_allowed_mask;
 	alloc_mask = gfp_mask;
 	if (!prepare_alloc_pages(gfp_mask, order, preferred_nid, nodemask, &ac, &alloc_mask, &alloc_flags))
 		return NULL;
 
 	finalise_ac(gfp_mask, order, &ac);
+
+	/*
+	 * Attempt at including reclaim and compact 
+	 */
+	compact_priority = INIT_COMPACT_PRIORITY;
+
+	__alloc_pages_direct_reclaim(gfp_mask, order, alloc_flags, &ac, &did_some_progress);
+	__alloc_pages_direct_compact(gfp_mask, order, alloc_flags, &ac, compact_priority, &compact_result);
 
 	/* First allocation attempt */
 	page = get_page_from_freelist(alloc_mask, order, alloc_flags, &ac);

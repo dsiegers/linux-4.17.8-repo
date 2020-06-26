@@ -4446,10 +4446,7 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	gfp_t alloc_mask; /* The gfp_t that was actually used for allocation */
 	struct alloc_context ac = { };
 
-	// new vars for added reclaim and compact
-	unsigned long did_some_progress;
-	enum compact_priority compact_priority;
-	enum compact_result compact_result;
+	unsigned long *did_some_progress;
 
 	gfp_mask &= gfp_allowed_mask;
 	alloc_mask = gfp_mask;
@@ -4461,13 +4458,12 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	/*
 	 * Attempt at including reclaim and compact 
 	 */
-	compact_priority = INIT_COMPACT_PRIORITY;
 	
-	printk(KERN_ALERT "Prior to attempt to reclaim in nodemask\n");
-	__alloc_pages_direct_reclaim(gfp_mask, order, alloc_flags, &ac, &did_some_progress);
-	printk(KERN_ALERT "After reclaim, before compact - nodemask\n");
-	__alloc_pages_direct_compact(gfp_mask, order, alloc_flags, &ac, compact_priority, &compact_result);
-	printk(KERN_ALERT "After compact in nodemask\n");
+	printk(KERN_INFO "Prior to attempt to reclaim in nodemask\n");
+	*did_some_progress = __perform_reclaim(gfp_mask, order, &ac);
+	printk(KERN_INFO "After reclaim in nodemask\n");
+
+
 
 	/* First allocation attempt */
 	page = get_page_from_freelist(alloc_mask, order, alloc_flags, &ac);

@@ -4459,9 +4459,9 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	 * Attempt at including reclaim and compact 
 	 */
 	
-	printk(KERN_INFO "Prior to attempt to reclaim in nodemask\n");
-	*did_some_progress = __perform_reclaim(gfp_mask, order, &ac);
-	printk(KERN_INFO "After reclaim in nodemask\n");
+	//printk(KERN_INFO "Prior to attempt to reclaim in nodemask\n");
+	//*did_some_progress = __perform_reclaim(gfp_mask, order, &ac);
+	//printk(KERN_INFO "After reclaim in nodemask\n");
 
 
 

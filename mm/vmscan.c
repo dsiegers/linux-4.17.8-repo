@@ -2847,8 +2847,13 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 	pg_data_t *last_pgdat;
 	struct zoneref *z;
 	struct zone *zone;
+	u64 cycle_start;
 retry:
+	cycle_start = rdtsc_ordered();
+
 	delayacct_freepages_start();
+
+	__this_cpu_add(freelistTry, rdtsc_ordered() - cycle_start);	
 
 	if (global_reclaim(sc))
 		__count_zid_vm_events(ALLOCSTALL, sc->reclaim_idx, 1);

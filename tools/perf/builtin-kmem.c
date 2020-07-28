@@ -635,6 +635,7 @@ static const struct {
 	{ "GFP_NOIO",			"NI" },
 	{ "GFP_NOWAIT",			"NW" },
 	{ "GFP_DMA",			"D" },
+	{ "GFP_FASTPATH",		"FP" },		// DS addition to table
 	{ "__GFP_HIGHMEM",		"HM" },
 	{ "GFP_DMA32",			"D32" },
 	{ "__GFP_HIGH",			"H" },
@@ -658,7 +659,6 @@ static const struct {
 	{ "__GFP_RECLAIM",		"R" },
 	{ "__GFP_DIRECT_RECLAIM",	"DR" },
 	{ "__GFP_KSWAPD_RECLAIM",	"KR" },
-	{ "__GFP_FASTPATH",		"FP" },
 };
 
 static size_t max_gfp_len;

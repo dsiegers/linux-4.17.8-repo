@@ -78,20 +78,6 @@ static DEFINE_MUTEX(pcp_batch_high_lock);
 #define MIN_PERCPU_PAGELIST_FRACTION	(8)
 
 #ifdef CONFIG_USE_PERCPU_NUMA_NODE_ID
-DEFINE_PER_CPU(unsigned long int, freelistCounter);		//counter for the passes in get_page_from_freelist
-EXPORT_PER_CPU_SYMBOL(freelistCounter);
-DEFINE_PER_CPU(unsigned long int, compactCounter);             //counter for the passes in __alloc_pages_direst_compact
-EXPORT_PER_CPU_SYMBOL(compactCounter);
-DEFINE_PER_CPU(unsigned long int, reclaimCounter);             //counter for the passes in __alloc_pages_direct_reclaim
-EXPORT_PER_CPU_SYMBOL(reclaimCounter);
-DEFINE_PER_CPU(unsigned long int, cpusetCounter);             //counter for the passes in __alloc_pages_cpuset_fallback
-EXPORT_PER_CPU_SYMBOL(cpusetCounter);
-DEFINE_PER_CPU(unsigned long int, freelistIf);             //time counter for the passes in freelist if
-EXPORT_PER_CPU_SYMBOL(freelistIf);
-DEFINE_PER_CPU(unsigned long int, freelistEndif);             //time counter for the passes in freelist endif
-EXPORT_PER_CPU_SYMBOL(freelistEndif);
-
-
 
 
 
@@ -3288,9 +3274,6 @@ get_page_from_freelist(gfp_t gfp_mask, unsigned int order, int alloc_flags,
 	struct zoneref *z = ac->preferred_zoneref;
 	struct zone *zone;
 	struct pglist_data *last_pgdat_dirty_limit = NULL;
-	u64 cycle_start;
-	u64 rmqueue_cycle_start;
-	int try_this=0;
 
 
 	/*
@@ -3408,9 +3391,7 @@ try_this_zone:
 			 */
 			if (unlikely(order && (alloc_flags & ALLOC_HARDER)))
 				reserve_highatomic_pageblock(page, zone, order);
-
-
-			try_this = 0;			
+	
 	
 
 			return page;
@@ -3419,7 +3400,6 @@ try_this_zone:
 			/* Try again if zone has deferred pages */
 			if (static_branch_unlikely(&deferred_pages)) {
 				if (_deferred_grow_zone(zone, order)){
-					try_this = 1;
 					goto try_this_zone;
 				}
 			}
@@ -3822,10 +3802,6 @@ __perform_reclaim(gfp_t gfp_mask, unsigned int order,
 	int progress;
 	unsigned int noreclaim_flag;
 
-	this_cpu_inc(freelistCounter);
-	u64 cycle_start = rdtsc_ordered();
-	u64 cycle_prog;
-
 	cond_resched();
 
 	/* We now go into synchronous reclaim */
@@ -3835,20 +3811,14 @@ __perform_reclaim(gfp_t gfp_mask, unsigned int order,
 	reclaim_state.reclaimed_slab = 0;
 	current->reclaim_state = &reclaim_state;
 
-	cycle_prog = rdtsc_ordered();
-
 	progress = try_to_free_pages(ac->zonelist, order, gfp_mask,
 								ac->nodemask);
-
-	 __this_cpu_add(freelistEndif, rdtsc_ordered() - cycle_prog);
 
 	current->reclaim_state = NULL;
 	fs_reclaim_release(gfp_mask);
 	memalloc_noreclaim_restore(noreclaim_flag);
 
 	cond_resched();
-
-	__this_cpu_add(freelistIf, rdtsc_ordered() - cycle_start);
 
 	return progress;
 }
@@ -4130,7 +4100,7 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
 	unsigned int cpuset_mems_cookie;
 	int reserve_flags;
 
-	u64 cycle_start;
+
 
 	/*
 	 * In the slowpath, we sanity check order to avoid ever trying to

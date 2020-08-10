@@ -61,6 +61,19 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/vmscan.h>
 
+DEFINE_PER_CPU(unsigned long int, freelistCounter);             //counter for the passes in get_page_from_freelist
+EXPORT_PER_CPU_SYMBOL(freelistCounter);
+DEFINE_PER_CPU(unsigned long int, compactCounter);             //counter for the passes in __alloc_pages_direst_compact
+EXPORT_PER_CPU_SYMBOL(compactCounter);
+DEFINE_PER_CPU(unsigned long int, reclaimCounter);             //counter for the passes in __alloc_pages_direct_reclaim
+EXPORT_PER_CPU_SYMBOL(reclaimCounter);
+DEFINE_PER_CPU(unsigned long int, cpusetCounter);             //counter for the passes in __alloc_pages_cpuset_fallback
+EXPORT_PER_CPU_SYMBOL(cpusetCounter);
+DEFINE_PER_CPU(unsigned long int, freelistIf);             //time counter for the passes in freelist if
+EXPORT_PER_CPU_SYMBOL(freelistIf);
+DEFINE_PER_CPU(unsigned long int, freelistEndif);             //time counter for the passes in freelist endif
+EXPORT_PER_CPU_SYMBOL(freelistEndif);
+
 
 DEFINE_PER_CPU(unsigned long int, freelistTry);             //time counter for the passes in freelist try this zone
 EXPORT_PER_CPU_SYMBOL(freelistTry);
@@ -2090,11 +2103,14 @@ static unsigned long shrink_list(enum lru_list lru, unsigned long nr_to_scan,
 				 struct scan_control *sc)
 {
 	if (is_active_lru(lru)) {
+		 __this_cpu_inc(freelistEndif);
+
 		if (inactive_list_is_low(lruvec, is_file_lru(lru),
 					 memcg, sc, true))
 			shrink_active_list(nr_to_scan, lruvec, sc, lru);
 		return 0;
 	}
+	 __this_cpu_inc(freelistTry);
 
 	return shrink_inactive_list(nr_to_scan, lruvec, sc, lru);
 }
@@ -2548,6 +2564,8 @@ static bool shrink_node(pg_data_t *pgdat, struct scan_control *sc)
 			unsigned long reclaimed;
 			unsigned long scanned;
 
+			__this_cpu_inc(freelistIf);
+
 			if (mem_cgroup_low(root, memcg)) {
 				if (!sc->memcg_low_reclaim) {
 					sc->memcg_low_skipped = 1;
@@ -2729,6 +2747,101 @@ static void shrink_zones(struct zonelist *zonelist, struct scan_control *sc)
 	gfp_t orig_mask;
 	pg_data_t *last_pgdat = NULL;
 
+	
+	/*
+	 * If the number of buffer_heads in the machine exceeds the maximum
+	 * allowed level, force direct reclaim to scan the highmem zone as
+	 * highmem pages could be pinning lowmem pages storing buffer_heads
+	 */
+	orig_mask = sc->gfp_mask;
+	if (buffer_heads_over_limit) {
+		sc->gfp_mask |= __GFP_HIGHMEM;
+		sc->reclaim_idx = gfp_zone(sc->gfp_mask);
+	}
+
+
+	for_each_zone_zonelist_nodemask(zone, z, zonelist,
+					sc->reclaim_idx, sc->nodemask) {
+		/*
+		 * Take care memory controller reclaiming has small influence
+		 * to global LRU.
+		 */
+		if (global_reclaim(sc)) {
+			if (!cpuset_zone_allowed(zone,
+						 GFP_KERNEL | __GFP_HARDWALL))
+				continue;
+
+			/*
+			 * If we already have plenty of memory free for
+			 * compaction in this zone, don't free any more.
+			 * Even though compaction is invoked for any
+			 * non-zero order, only frequent costly order
+			 * reclamation is disruptive enough to become a
+			 * noticeable problem, like transparent huge
+			 * page allocations.
+			 */
+			if (IS_ENABLED(CONFIG_COMPACTION) &&
+			    sc->order > PAGE_ALLOC_COSTLY_ORDER &&
+			    compaction_ready(zone, sc)) {
+				sc->compaction_ready = true;
+				continue;
+			}
+
+			/*
+			 * Shrink each node in the zonelist once. If the
+			 * zonelist is ordered by zone (not the default) then a
+			 * node may be shrunk multiple times but in that case
+			 * the user prefers lower zones being preserved.
+			 */
+			if (zone->zone_pgdat == last_pgdat)
+				continue;
+
+			/*
+			 * This steals pages from memory cgroups over softlimit
+			 * and returns the number of reclaimed pages and
+			 * scanned pages. This works for global memory pressure
+			 * and balancing, not for a memcg's limit.
+			 */
+
+			nr_soft_scanned = 0;
+			nr_soft_reclaimed = mem_cgroup_soft_limit_reclaim(zone->zone_pgdat,
+						sc->order, sc->gfp_mask,
+						&nr_soft_scanned);
+			sc->nr_reclaimed += nr_soft_reclaimed;
+			sc->nr_scanned += nr_soft_scanned;
+
+			/* need some check for avoid more shrink_zone() */
+		}
+
+		/* See comment about same check for global reclaim above */
+		if (zone->zone_pgdat == last_pgdat){
+			continue;
+		}
+		last_pgdat = zone->zone_pgdat;
+
+
+		shrink_node(zone->zone_pgdat, sc);
+	}
+
+	/*
+	 * Restore to original mask to avoid the impact on the caller if we
+	 * promoted it to __GFP_HIGHMEM.
+	 */
+	sc->gfp_mask = orig_mask;
+}
+
+/*
+ * 'Quick' version added by DS
+ */
+static void shrink_zones_quick(struct zonelist *zonelist, struct scan_control *sc)
+{
+	struct zoneref *z;
+	struct zone *zone;
+	unsigned long nr_soft_reclaimed;
+	unsigned long nr_soft_scanned;
+	gfp_t orig_mask;
+	pg_data_t *last_pgdat = NULL;
+
 	/*
 	 * If the number of buffer_heads in the machine exceeds the maximum
 	 * allowed level, force direct reclaim to scan the highmem zone as
@@ -2805,6 +2918,8 @@ static void shrink_zones(struct zonelist *zonelist, struct scan_control *sc)
 	sc->gfp_mask = orig_mask;
 }
 
+
+
 static void snapshot_refaults(struct mem_cgroup *root_memcg, pg_data_t *pgdat)
 {
 	struct mem_cgroup *memcg;
@@ -2847,13 +2962,85 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 	pg_data_t *last_pgdat;
 	struct zoneref *z;
 	struct zone *zone;
-	u64 cycle_start;
-retry:
-	cycle_start = rdtsc_ordered();
 
+	u64 cycle_while;
+
+retry:
 	delayacct_freepages_start();
 
-	__this_cpu_add(freelistTry, rdtsc_ordered() - cycle_start);	
+	if (global_reclaim(sc))
+		__count_zid_vm_events(ALLOCSTALL, sc->reclaim_idx, 1);
+
+	do {
+		vmpressure_prio(sc->gfp_mask, sc->target_mem_cgroup,
+				sc->priority);
+		cycle_while = rdtsc_ordered();	
+
+		sc->nr_scanned = 0;
+		shrink_zones(zonelist, sc);
+
+		 __this_cpu_add(freelistCounter, rdtsc_ordered() - cycle_while);
+
+		if (sc->nr_reclaimed >= sc->nr_to_reclaim){
+			break;
+		}
+
+		if (sc->compaction_ready){
+			break;
+		}
+
+		/*
+		 * If we're getting trouble reclaiming, start doing
+		 * writepage even in laptop mode.
+		 */
+		if (sc->priority < DEF_PRIORITY - 2)
+			sc->may_writepage = 1;
+
+	} while (--sc->priority >= 0);
+
+	last_pgdat = NULL;
+	for_each_zone_zonelist_nodemask(zone, z, zonelist, sc->reclaim_idx,
+					sc->nodemask) {
+		if (zone->zone_pgdat == last_pgdat){
+			continue;
+		}
+		last_pgdat = zone->zone_pgdat;
+		snapshot_refaults(sc->target_mem_cgroup, zone->zone_pgdat);
+		set_memcg_congestion(last_pgdat, sc->target_mem_cgroup, false);
+	}
+
+	delayacct_freepages_end();	
+
+	if (sc->nr_reclaimed)
+		return sc->nr_reclaimed;
+
+	/* Aborted reclaim to try compaction? don't OOM, then */
+	if (sc->compaction_ready)
+		return 1;
+
+	/* Untapped cgroup reserves?  Don't OOM, retry. */
+	if (sc->memcg_low_skipped) {
+		sc->priority = initial_priority;
+		sc->memcg_low_reclaim = 1;
+		sc->memcg_low_skipped = 0;
+		goto retry;
+	}
+
+	return 0;
+}
+
+/*
+ * New 'quick' version added by DS
+ */
+static unsigned long do_try_to_free_pages_quick(struct zonelist *zonelist,
+					  struct scan_control *sc)
+{
+	int initial_priority = sc->priority;
+	pg_data_t *last_pgdat;
+	struct zoneref *z;
+	struct zone *zone;
+retry:
+	delayacct_freepages_start();
 
 	if (global_reclaim(sc))
 		__count_zid_vm_events(ALLOCSTALL, sc->reclaim_idx, 1);
@@ -2862,7 +3049,7 @@ retry:
 		vmpressure_prio(sc->gfp_mask, sc->target_mem_cgroup,
 				sc->priority);
 		sc->nr_scanned = 0;
-		shrink_zones(zonelist, sc);
+		shrink_zones_quick(zonelist, sc);
 
 		if (sc->nr_reclaimed >= sc->nr_to_reclaim)
 			break;
@@ -2907,6 +3094,7 @@ retry:
 
 	return 0;
 }
+
 
 static bool allow_direct_reclaim(pg_data_t *pgdat)
 {
@@ -3069,7 +3257,13 @@ unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
 				sc.gfp_mask,
 				sc.reclaim_idx);
 
-	nr_reclaimed = do_try_to_free_pages(zonelist, &sc);
+	if (gfp_mask == GFP_FASTPATH){
+		nr_reclaimed = do_try_to_free_pages_quick(zonelist, &sc);
+	}
+
+	else {
+		nr_reclaimed = do_try_to_free_pages(zonelist, &sc);
+	}
 
 	trace_mm_vmscan_direct_reclaim_end(nr_reclaimed);
 
